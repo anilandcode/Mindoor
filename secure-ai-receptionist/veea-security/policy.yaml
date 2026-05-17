@@ -1,0 +1,35 @@
+# policy.yaml
+version: "1.0"
+policy_name: Mindoor-Wellness-Strict-Policy
+default_action: ALLOW
+
+ingress_rules:
+  # Rule 1: Catch hackers trying to jailbreak the bot
+  - name: block_prompt_injection
+    priority: 100
+    action: QUARANTINE
+    deny_message: "[LOBSTER TRAP] Security Alert: Adversarial prompt injection detected. Your request has been blocked for safety."
+    conditions:
+      - field: contains_injection_patterns
+        match_type: boolean
+        value: true
+
+  # Rule 2: Prevent the bot from leaking internal DB info
+  - name: block_exfiltration
+    priority: 90
+    action: DENY
+    deny_message: "[LOBSTER TRAP] Data Security Alert: This request appears to be attempting unauthorized data extraction."
+    conditions:
+      - field: contains_exfiltration
+        match_type: boolean
+        value: true
+
+  # Rule 3: Flag sensitive patient data (PII) for review
+  - name: flag_patient_data
+    priority: 80
+    action: HUMAN_REVIEW
+    deny_message: "[LOBSTER TRAP] Privacy Guard: Your request contains sensitive information that requires manual review."
+    conditions:
+      - field: contains_pii
+        match_type: boolean
+        value: true
