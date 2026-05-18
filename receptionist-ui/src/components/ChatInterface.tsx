@@ -50,6 +50,15 @@ export default function ChatInterface({ compact = false, light = false }: ChatIn
   const [loaderStage, setLoaderStage] = useState(0);
   const [securityStatus, setSecurityStatus] = useState<"protected" | "alert">("protected");
   const [guardsOff, setGuardsOff] = useState(false);
+  const [declaredIntent, setDeclaredIntent] = useState<string>("info");
+
+  const DECLARED_INTENTS: { value: string; label: string }[] = [
+    { value: "booking",   label: "Book an appointment" },
+    { value: "info",      label: "Clinic info (hours / services)" },
+    { value: "insurance", label: "Insurance question" },
+    { value: "records",   label: "Request my records" },
+    { value: "message",   label: "Leave a message" },
+  ];
 
   useEffect(() => {
     if (!isLoading) {
@@ -106,6 +115,7 @@ export default function ChatInterface({ compact = false, light = false }: ChatIn
               role: m.role,
               content: m.content,
             })),
+            declared_intent: declaredIntent,
           }),
         },
       );
@@ -351,10 +361,42 @@ export default function ChatInterface({ compact = false, light = false }: ChatIn
       <form
         onSubmit={handleSendMessage}
         className={cn(
-          "p-4 border-t",
+          "p-4 border-t space-y-2",
           t("bg-neutral-50/40 border-neutral-200", "bg-white/5 border-white/10")
         )}
       >
+        {/* Declared-intent dropdown (Veea declared-vs-detected mismatch signal) */}
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className={cn(
+            "font-mono uppercase tracking-wider",
+            t("text-neutral-500", "text-white/40")
+          )}>
+            I want to:
+          </span>
+          <select
+            value={declaredIntent}
+            onChange={(e) => setDeclaredIntent(e.target.value)}
+            className={cn(
+              "flex-1 rounded-md py-1 px-2 text-[12px] border focus:outline-none focus:ring-1 transition-all",
+              t(
+                "bg-white border-neutral-200 text-neutral-800 focus:ring-emerald-500/30",
+                "bg-white/5 border-white/10 text-white/80 focus:ring-brand-primary/30"
+              )
+            )}
+          >
+            {DECLARED_INTENTS.map((it) => (
+              <option key={it.value} value={it.value} className={t("text-neutral-900", "text-neutral-900")}>
+                {it.label}
+              </option>
+            ))}
+          </select>
+          <span className={cn(
+            "text-[10px] font-mono",
+            t("text-neutral-400", "text-white/30")
+          )}>
+            · declared intent
+          </span>
+        </div>
         <div className="relative group">
           <input
             type="text"

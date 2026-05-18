@@ -46,6 +46,49 @@ def get_gemini_client():
 # ---------------------------------------------------------------------------
 events_store: list[dict] = []
 
+# ---------------------------------------------------------------------------
+# Drift monitoring — rolling allow-rate analyser
+# ---------------------------------------------------------------------------
+# 0 = blocked/quarantined, 1 = allowed. We track the last 50, compare a 20-event
+# moving window against a longer 50-event baseline. If they diverge >25% with
+# enough samples, we synthesize a DRIFT event.
+drift_buffer: list[int] = []
+drift_last_alert_idx: int = -100  # don't spam alerts; require 10 events between
+
+def _drift_check_and_alert():
+    """Inspect the rolling buffer; if a drift threshold is crossed, append a
+    synthetic DRIFT event to the main event log."""
+    global drift_last_alert_idx
+    if len(drift_buffer) < 30:
+        return
+    recent = drift_buffer[-20:]
+    baseline = drift_buffer[-50:] if len(drift_buffer) >= 50 else drift_buffer
+    cur_rate = sum(recent) / len(recent)
+    base_rate = sum(baseline) / len(baseline)
+    delta = cur_rate - base_rate
+    # Only alert when we have moved at least 10 events since last alert
+    if abs(delta) >= 0.25 and (len(drift_buffer) - drift_last_alert_idx) >= 10:
+        drift_last_alert_idx = len(drift_buffer)
+        evt = {
+            "id": str(uuid.uuid4())[:8],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "action": "DRIFT",
+            "category": "drift_monitor",
+            "category_label": "Behavior Drift",
+            "risk": round(0.5 + abs(delta), 2),
+            "rule": "allow_rate_drift",
+            "snippet": f"Allow rate shifted: baseline {base_rate:.0%} -> recent {cur_rate:.0%} (delta {delta:+.0%})",
+            "latency_ms": 0.0,
+            "source": "drift_monitor",
+            "metadata": {
+                "baseline_rate": round(base_rate, 3),
+                "current_rate":  round(cur_rate, 3),
+                "delta":         round(delta, 3),
+            },
+        }
+        events_store.append(evt)
+        print(f"\n[DRIFT] alert | baseline={base_rate:.0%} current={cur_rate:.0%} delta={delta:+.0%}")
+
 def detect_category(prompt: str) -> str:
     p = prompt.lower()
     if any(k in p for k in [
@@ -120,6 +163,41 @@ def append_event(event: dict) -> None:
     events_store.append(event)
     if len(events_store) > 1000:
         events_store.pop(0)
+    # Feed drift monitor (count ALLOW as 1, every other action as 0; ignore
+    # synthetic drift events themselves to avoid feedback loops)
+    action = event.get("action", "")
+    if action in ("ALLOW", "BLOCK", "QUARANTINE", "MISMATCH"):
+        drift_buffer.append(1 if action == "ALLOW" else 0)
+        if len(drift_buffer) > 100:
+            drift_buffer.pop(0)
+        _drift_check_and_alert()
+
+# ---------------------------------------------------------------------------
+# Declared-vs-Detected intent comparison (Veea bonus criterion)
+# ---------------------------------------------------------------------------
+# Maps the patient's *declared* intent (chosen from the UI dropdown) to the
+# set of detected categories that are consistent with it. If the detected
+# category falls outside this set, we emit an INTENT_MISMATCH event in
+# addition to whatever the regex layer already does.
+DECLARED_INTENT_EXPECTED: dict[str, set[str]] = {
+    "booking":   {"general"},
+    "info":      {"general"},
+    "insurance": {"general"},
+    "records":   {"general", "phi_exfiltration"},  # records request CAN trip PHI patterns legitimately
+    "message":   {"general"},
+}
+DECLARED_INTENT_LABELS: dict[str, str] = {
+    "booking":   "Book an appointment",
+    "info":      "Clinic information",
+    "insurance": "Insurance question",
+    "records":   "Request my records",
+    "message":   "Leave a message",
+}
+
+def intent_mismatch(declared: Optional[str], detected_category: str) -> bool:
+    if not declared or declared not in DECLARED_INTENT_EXPECTED:
+        return False
+    return detected_category not in DECLARED_INTENT_EXPECTED[declared]
 
 # ---------------------------------------------------------------------------
 # Security pattern matching (FastAPI layer — second line of defense)
@@ -460,11 +538,29 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     model: str = "gemini-2.5-flash-lite"
     messages: list[ChatMessage]
+    declared_intent: Optional[str] = None  # one of DECLARED_INTENT_EXPECTED keys
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest, guards_off: bool = Query(False)):
     start = time.perf_counter()
     user_message = request.messages[-1].content
+
+    # ── DECLARED-VS-DETECTED INTENT MISMATCH (Veea bonus criterion) ──────────
+    # Always run, regardless of guards_off — the mismatch IS the security signal.
+    detected_for_intent = detect_category(user_message)
+    if intent_mismatch(request.declared_intent, detected_for_intent):
+        mm_evt = make_event(
+            user_message, "MISMATCH", "declared_vs_detected_mismatch",
+            (time.perf_counter() - start) * 1000, "intent_inspector",
+        )
+        mm_evt["metadata"] = {
+            "declared_intent":       request.declared_intent,
+            "declared_intent_label": DECLARED_INTENT_LABELS.get(request.declared_intent or "", request.declared_intent),
+            "detected_category":     detected_for_intent,
+            "detected_label":        CATEGORY_LABELS.get(detected_for_intent, detected_for_intent),
+        }
+        append_event(mm_evt)
+        print(f"\n[INTENT MISMATCH] declared={request.declared_intent} detected={detected_for_intent}")
 
     # ── DEMO TOGGLE: Lobster Trap / regex layer disabled ─────────────────────
     # When guards_off=true, skip the application-layer security check entirely.
@@ -539,22 +635,114 @@ async def log_external_event(body: ExternalEventBody):
     return {"ok": True, "event_id": event["id"]}
 
 # ---------------------------------------------------------------------------
+# Single-prompt Inspector (Veea ./lobstertrap inspect equivalent — UI version)
+# Pure analysis, no model call, no event log mutation.
+# ---------------------------------------------------------------------------
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: 1 token ≈ 4 chars for English. Good enough for UI."""
+    return max(1, len(text) // 4)
+
+def _matched_patterns(text: str) -> list[str]:
+    """Return ALL regex patterns that match (block_reason returns only the first)."""
+    matches = []
+    for pat in SECURITY_BLOCK_PATTERNS:
+        if re.search(pat, text):
+            matches.append(pat)
+    return matches
+
+class InspectRequest(BaseModel):
+    prompt: str
+    declared_intent: Optional[str] = None
+
+@app.post("/api/inspect")
+async def inspect_prompt(body: InspectRequest):
+    prompt = body.prompt or ""
+    detected = detect_category(prompt)
+    risk = CATEGORY_RISK.get(detected, 0.25)
+    matches = _matched_patterns(prompt)
+    would_action = "BLOCK" if matches else "ALLOW"
+    would_rule = "regex_pattern_match" if matches else "passed_all_layers"
+    mismatch = intent_mismatch(body.declared_intent, detected)
+
+    # Read active policy hash on the fly (cheap — small file)
+    policy_path = _active_policy_path()
+    try:
+        with open(policy_path, "rb") as f:
+            policy_hash = hashlib.sha256(f.read()).hexdigest()[:16]
+    except FileNotFoundError:
+        policy_hash = "unavailable"
+
+    return {
+        "input_prompt":      prompt,
+        "char_count":        len(prompt),
+        "estimated_tokens":  _estimate_tokens(prompt),
+        "detected_category": detected,
+        "category_label":    CATEGORY_LABELS.get(detected, detected),
+        "risk_score":        risk,
+        "matched_patterns":  matches[:5],  # cap for UI
+        "matched_count":     len(matches),
+        "would_action":      would_action,
+        "would_rule":        would_rule,
+        "declared_intent":   body.declared_intent,
+        "declared_intent_label": DECLARED_INTENT_LABELS.get(body.declared_intent or "", None),
+        "intent_mismatch":   mismatch,
+        "policy_pack":       os.getenv("ACTIVE_POLICY_PACK", "hipaa"),
+        "policy_hash":       policy_hash,
+    }
+
+# ---------------------------------------------------------------------------
+# Active policy info (used by operator dashboard header badge)
+# ---------------------------------------------------------------------------
+def _active_policy_path() -> str:
+    pack = os.getenv("ACTIVE_POLICY_PACK", "hipaa").lower()
+    base = os.path.join(os.path.dirname(__file__), "veea-security")
+    candidate = os.path.join(base, f"policy.{pack}.yaml")
+    if os.path.exists(candidate):
+        return candidate
+    # default fallback
+    return os.path.join(base, "policy.yaml")
+
+@app.get("/api/policy-info")
+async def policy_info():
+    pack = os.getenv("ACTIVE_POLICY_PACK", "hipaa").lower()
+    path = _active_policy_path()
+    try:
+        with open(path, "rb") as f:
+            content = f.read()
+        sha = hashlib.sha256(content).hexdigest()
+        rule_count = content.decode("utf-8", errors="replace").count("- name:")
+    except FileNotFoundError:
+        sha = "unavailable"
+        rule_count = 0
+    return {
+        "pack":       pack,
+        "pack_label": {"hipaa": "HIPAA §164.312", "soc2": "SOC 2 Trust Services"}.get(pack, pack.upper()),
+        "version":    "1.0",
+        "sha256":     sha,
+        "rule_count": rule_count,
+    }
+
+# ---------------------------------------------------------------------------
 # Events API
 # ---------------------------------------------------------------------------
 @app.get("/api/events")
 async def get_events(limit: int = Query(100, ge=1, le=500)):
     recent = list(reversed(events_store[-limit:]))
-    total = len(events_store)
-    blocked = sum(1 for e in events_store if e["action"] != "ALLOW")
-    allowed = total - blocked
+    total      = len(events_store)
+    blocked    = sum(1 for e in events_store if e["action"] in ("BLOCK", "QUARANTINE"))
+    allowed    = sum(1 for e in events_store if e["action"] == "ALLOW")
+    mismatches = sum(1 for e in events_store if e["action"] == "MISMATCH")
+    drift      = sum(1 for e in events_store if e["action"] == "DRIFT")
     latencies = [e["latency_ms"] for e in events_store if e["latency_ms"] > 0]
     median_latency = sorted(latencies)[len(latencies) // 2] if latencies else 0.0
     return {
         "events": recent,
         "stats": {
-            "total": total,
-            "blocked": blocked,
-            "allowed": allowed,
+            "total":             total,
+            "blocked":           blocked,
+            "allowed":           allowed,
+            "mismatches":        mismatches,
+            "drift_alerts":      drift,
             "median_latency_ms": round(median_latency, 1),
         },
     }

@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Download, RefreshCw } from "lucide-react";
 import EventCard, { type SecurityEvent } from "./EventCard";
 import StatStrip from "./StatStrip";
+import InspectorPanel from "./InspectorPanel";
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 const EVENTS_URL = `${API_BASE}/api/events`;
@@ -93,6 +94,9 @@ export default function SecurityFeed() {
         ) : (
           events.map((ev) => <EventCard key={ev.id} event={ev} />)
         )}
+
+        {/* Inspector panel — Veea ./lobstertrap inspect CLI as a UI */}
+        <InspectorPanel />
       </div>
 
       {/* HIPAA Export button */}

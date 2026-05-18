@@ -1,0 +1,110 @@
+# policy.soc2.yaml — Mindoor SOC 2 Trust Services Policy Pack
+# Lobster Trap configuration for enterprise SOC 2 deployments.
+# Set ACTIVE_POLICY_PACK=soc2 to activate. Generated alongside the HIPAA pack
+# to demonstrate Lobster Trap's policy-pack pattern (Veea-recommended).
+version: "1.0"
+policy_name: Mindoor-SOC2-Trust-Services-Policy
+default_action: ALLOW
+
+ingress_rules:
+
+  # ── CC6.1 LOGICAL ACCESS — Credential exfiltration ──────────────────────────
+  - name: block_credential_exfiltration
+    priority: 100
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] SOC 2 CC6.1 (Logical Access): Credential exfiltration attempt blocked and logged."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(password|api key|secret key|access token|bearer token|private key|aws_(?:access|secret)|database (url|password|connection)).{0,40}(staff|admin|prod|production|internal|service|backend|vault)"
+
+  # ── CC6.6 SYSTEM OPERATIONS — Log / audit access prevention ─────────────────
+  - name: block_unauthorized_log_access
+    priority: 95
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] SOC 2 CC6.6: Unauthorized log access attempt blocked."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(show|dump|export|email|send|forward).{0,40}(audit (log|trail)|access log|activity log|system log|admin log|sql (log|history))"
+
+  # ── CC6.3 ROLE-BASED ACCESS — Privilege escalation ──────────────────────────
+  - name: block_privilege_escalation
+    priority: 90
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] SOC 2 CC6.3 (Role-based Access): Privilege escalation attempt blocked."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(admin mode|override security|bypass|sudo|root access|elevated access|grant (admin|root) access|impersonate (admin|user)|switch user)"
+
+  # ── CC5.1 CONTROL ENVIRONMENT — Customer / Employee PII exfiltration ────────
+  - name: block_pii_exfiltration
+    priority: 85
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] SOC 2 CC5.1: PII exfiltration attempt blocked and logged."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(email|send|forward|export|dump|list|show).{0,60}(customer (data|list|record|email|phone)|employee (data|record|salary|ssn|address)|user (database|table|email list)|all customers|all employees)"
+
+  # ── CC7.2 SYSTEM MONITORING — Persistent instruction injection ──────────────
+  - name: block_data_poisoning
+    priority: 80
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] SOC 2 CC7.2: System integrity violation — persistent instruction injection blocked."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(remember (from now on|always|forever)|from now on (always|you (must|will|should))|update your (rules|policy|instructions)|add to (your )?(memory|context)|store this (rule|policy|instruction))"
+
+  # ── CC4.1 MONITORING — Prompt injection (generic) ───────────────────────────
+  - name: block_prompt_injection_generic
+    priority: 75
+    action: QUARANTINE
+    deny_message: "[MINDOOR SECURITY] SOC 2 CC4.1: Adversarial prompt injection detected. Interaction logged for security review."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(ignore previous|ignore all|forget everything|new persona|system prompt|</?(s|system|prompt)>|\\[SYSTEM\\]|\\[INST\\]|<\\|.*\\|>)"
+
+  # ── CC6.7 TRANSMISSION SECURITY — Webhook / data exfiltration ───────────────
+  - name: block_webhook_exfiltration
+    priority: 70
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] SOC 2 CC6.7: Outbound data transmission to untrusted endpoint blocked."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(post|send|webhook|http(?:s)?:\\/\\/|curl|fetch).{0,60}(\\.evil|\\.attacker|pastebin|webhook\\.site|ngrok\\.io|requestbin)"
+
+  # ── CC4.2 ANOMALY DETECTION — Jailbreak / persona override ──────────────────
+  - name: block_jailbreak_roleplay
+    priority: 65
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] SOC 2 CC4.2: Persona override / jailbreak attempt blocked."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(you are now|pretend you are|act as|roleplay|let'?s play a game|unrestricted|no policies|no restrictions|without guidelines|DAN|jailbreak)"
+
+egress_rules:
+
+  # CC6.7 Transmission Security — redact secrets in responses
+  - name: redact_api_keys_in_response
+    priority: 100
+    action: REDACT
+    conditions:
+      - field: body
+        match_type: regex
+        value: "(?i)\\b(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9]{20,}|AKIA[A-Z0-9]{16})\\b"
+    redact_with: "[REDACTED-API-KEY]"
+
+  - name: redact_email_addresses_in_response
+    priority: 90
+    action: REDACT
+    conditions:
+      - field: body
+        match_type: regex
+        value: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+    redact_with: "[REDACTED-EMAIL]"

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { ChevronDown, ChevronRight, Shield, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ChevronDown, ChevronRight, Shield, ShieldAlert, ShieldCheck, AlertTriangle } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -12,7 +12,7 @@ function cn(...inputs: ClassValue[]) {
 export interface SecurityEvent {
   id: string;
   timestamp: string;
-  action: "ALLOW" | "BLOCK" | "QUARANTINE";
+  action: "ALLOW" | "BLOCK" | "QUARANTINE" | "MISMATCH" | "DRIFT";
   category: string;
   category_label: string;
   risk: number;
@@ -20,6 +20,15 @@ export interface SecurityEvent {
   snippet: string;
   latency_ms: number;
   source: string;
+  metadata?: {
+    declared_intent?: string;
+    declared_intent_label?: string;
+    detected_category?: string;
+    detected_label?: string;
+    baseline_rate?: number;
+    current_rate?: number;
+    delta?: number;
+  };
 }
 
 interface EventCardProps {
@@ -55,12 +64,19 @@ function RiskBadge({ risk }: { risk: number }) {
 }
 
 function ActionChip({ action }: { action: SecurityEvent["action"] }) {
-  const map = {
+  const map: Record<SecurityEvent["action"], string> = {
     BLOCK:      "bg-red-500/15 text-red-400 border-red-500/25",
     QUARANTINE: "bg-orange-500/15 text-orange-400 border-orange-500/25",
     ALLOW:      "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
+    MISMATCH:   "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    DRIFT:      "bg-purple-500/15 text-purple-400 border-purple-500/30",
   };
-  const Icon = action === "ALLOW" ? ShieldCheck : action === "QUARANTINE" ? Shield : ShieldAlert;
+  const Icon =
+    action === "ALLOW"     ? ShieldCheck :
+    action === "QUARANTINE" ? Shield :
+    action === "MISMATCH"   ? AlertTriangle :
+    action === "DRIFT"      ? AlertTriangle :
+                              ShieldAlert;
   return (
     <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border", map[action])}>
       <Icon className="w-3 h-3" />
@@ -107,6 +123,26 @@ export default function EventCard({ event }: EventCardProps) {
       <p className="mt-1.5 text-white/50 truncate font-mono text-[10px] leading-relaxed">
         {event.snippet || "—"}
       </p>
+
+      {/* Mismatch breadcrumb */}
+      {event.action === "MISMATCH" && event.metadata?.declared_intent_label && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[10px] font-mono">
+          <span className="text-amber-400/70">Declared:</span>
+          <span className="text-amber-300">{event.metadata.declared_intent_label}</span>
+          <ChevronRight className="w-3 h-3 text-amber-400/50" />
+          <span className="text-red-300">{event.metadata.detected_label || event.metadata.detected_category}</span>
+        </div>
+      )}
+
+      {/* Drift breadcrumb */}
+      {event.action === "DRIFT" && event.metadata && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[10px] font-mono text-purple-300/80">
+          <span>baseline {(event.metadata.baseline_rate! * 100).toFixed(0)}%</span>
+          <ChevronRight className="w-3 h-3 text-purple-400/40" />
+          <span>now {(event.metadata.current_rate! * 100).toFixed(0)}%</span>
+          <span className="text-purple-200">({(event.metadata.delta! * 100).toFixed(0)}%)</span>
+        </div>
+      )}
 
       {/* Expanded */}
       {expanded && (
