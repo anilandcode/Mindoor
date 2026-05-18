@@ -5,7 +5,7 @@ import Link from "next/link";
 
 export default function OperatorPage() {
   return (
-    <main className="h-screen flex flex-col overflow-hidden relative">
+    <main className="h-screen flex flex-col overflow-hidden relative bg-neutral-950 text-white">
       {/* Background */}
       <div className="absolute top-[-10%] left-[-5%] w-[30%] h-[30%] bg-blue-500/10 rounded-full blur-[100px] -z-10" />
       <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[30%] bg-purple-500/10 rounded-full blur-[100px] -z-10" />

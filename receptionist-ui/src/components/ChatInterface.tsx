@@ -33,9 +33,12 @@ async function reportBlockToEventLog(snippet: string, rule: string, latency: num
 
 interface ChatInterfaceProps {
   compact?: boolean;
+  light?: boolean;  // light theme for the landing-page embed
 }
 
-export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
+export default function ChatInterface({ compact = false, light = false }: ChatInterfaceProps) {
+  // Theme-aware class helper — picks light or dark variant
+  const t = (lightCls: string, darkCls: string) => (light ? lightCls : darkCls);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
@@ -146,18 +149,31 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
   };
 
   return (
-    <div className={`flex flex-col ${compact ? "h-full" : "h-[80vh] max-w-4xl"} w-full glass-dark rounded-2xl overflow-hidden shadow-2xl border border-white/10`}>
+    <div className={cn(
+      "flex flex-col w-full rounded-2xl overflow-hidden",
+      compact ? "h-full" : "h-[80vh] max-w-4xl",
+      t(
+        "bg-white border border-neutral-200 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.15)]",
+        "glass-dark border border-white/10 shadow-2xl"
+      )
+    )}>
       {/* Header */}
-      <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
+      <div className={cn(
+        "p-4 flex items-center justify-between border-b",
+        t("bg-neutral-50/60 border-neutral-200", "bg-white/5 border-white/10")
+      )}>
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-brand-primary/20 flex items-center justify-center border border-brand-primary/30">
-            <Bot className="w-6 h-6 text-brand-primary" />
+          <div className={cn(
+            "w-10 h-10 rounded-full flex items-center justify-center border",
+            t("bg-emerald-50 border-emerald-200", "bg-brand-primary/20 border-brand-primary/30")
+          )}>
+            <Bot className={cn("w-6 h-6", t("text-emerald-700", "text-brand-primary"))} />
           </div>
           <div>
-            <h2 className="font-semibold text-lg leading-tight text-white">Mindoor Front Desk</h2>
+            <h2 className={cn("font-semibold text-lg leading-tight", t("text-neutral-900", "text-white"))}>Mindoor Front Desk</h2>
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-brand-secondary animate-pulse" />
-              <span className="text-xs text-white/50">Online • HIPAA Compliant</span>
+              <span className={cn("w-2 h-2 rounded-full animate-pulse", t("bg-emerald-500", "bg-brand-secondary"))} />
+              <span className={cn("text-xs", t("text-neutral-500", "text-white/50"))}>Online • HIPAA Compliant</span>
             </div>
           </div>
         </div>
@@ -170,22 +186,41 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
             className={cn(
               "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-mono uppercase tracking-wider transition-all border",
               guardsOff
-                ? "bg-brand-destructive/15 text-brand-destructive border-brand-destructive/40 hover:bg-brand-destructive/25"
-                : "bg-white/5 text-white/60 border-white/10 hover:text-white/90 hover:bg-white/10"
+                ? t(
+                    "bg-red-50 text-red-700 border-red-300 hover:bg-red-100",
+                    "bg-brand-destructive/15 text-brand-destructive border-brand-destructive/40 hover:bg-brand-destructive/25"
+                  )
+                : t(
+                    "bg-neutral-50 text-neutral-600 border-neutral-200 hover:text-neutral-900 hover:bg-neutral-100",
+                    "bg-white/5 text-white/60 border-white/10 hover:text-white/90 hover:bg-white/10"
+                  )
             )}
             title="Toggle Veea Lobster Trap on/off for demo"
           >
-            <span className={cn("w-1.5 h-1.5 rounded-full", guardsOff ? "bg-brand-destructive animate-pulse" : "bg-brand-secondary")} />
+            <span className={cn("w-1.5 h-1.5 rounded-full",
+              guardsOff
+                ? t("bg-red-600 animate-pulse", "bg-brand-destructive animate-pulse")
+                : t("bg-emerald-500", "bg-brand-secondary")
+            )} />
             Veea {guardsOff ? "OFF" : "ON"}
           </button>
 
           <div className={cn(
-            "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-500",
+            "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-500 border",
             guardsOff
-              ? "bg-brand-destructive/10 text-brand-destructive border border-brand-destructive/30"
+              ? t(
+                  "bg-red-50 text-red-700 border-red-200",
+                  "bg-brand-destructive/10 text-brand-destructive border-brand-destructive/30"
+                )
               : securityStatus === "protected"
-                ? "bg-brand-secondary/10 text-brand-secondary border border-brand-secondary/20"
-                : "bg-brand-destructive/10 text-brand-destructive border border-brand-destructive/20 glow shadow-brand-destructive/20"
+                ? t(
+                    "bg-emerald-50 text-emerald-700 border-emerald-200",
+                    "bg-brand-secondary/10 text-brand-secondary border-brand-secondary/20"
+                  )
+                : t(
+                    "bg-red-50 text-red-700 border-red-200",
+                    "bg-brand-destructive/10 text-brand-destructive border-brand-destructive/20 glow shadow-brand-destructive/20"
+                  )
           )}>
             {guardsOff ? (
               <>
@@ -222,18 +257,28 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
           >
             <div className={cn(
               "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-              msg.role === "user" ? "bg-white/10" : "bg-brand-primary/20"
+              msg.role === "user"
+                ? t("bg-neutral-200", "bg-white/10")
+                : t("bg-emerald-50 border border-emerald-100", "bg-brand-primary/20")
             )}>
-              {msg.role === "user" ? <User className="w-4 h-4 text-white/70" /> : <Bot className="w-4 h-4 text-brand-primary" />}
+              {msg.role === "user"
+                ? <User className={cn("w-4 h-4", t("text-neutral-600", "text-white/70"))} />
+                : <Bot className={cn("w-4 h-4", t("text-emerald-700", "text-brand-primary"))} />}
             </div>
-            
+
             <div className={cn(
               "max-w-[80%] p-4 rounded-2xl text-sm leading-relaxed",
-              msg.role === "user" 
-                ? "bg-brand-primary text-white rounded-tr-none" 
+              msg.role === "user"
+                ? t("bg-neutral-900 text-white rounded-tr-none", "bg-brand-primary text-white rounded-tr-none")
                 : msg.isSecurityAlert
-                  ? "bg-brand-destructive/20 text-brand-destructive border border-brand-destructive/30 rounded-tl-none font-medium italic"
-                  : "bg-white/5 text-white/90 border border-white/5 rounded-tl-none"
+                  ? t(
+                      "bg-red-50 text-red-700 border border-red-200 rounded-tl-none font-medium italic",
+                      "bg-brand-destructive/20 text-brand-destructive border border-brand-destructive/30 rounded-tl-none font-medium italic"
+                    )
+                  : t(
+                      "bg-neutral-100 text-neutral-900 border border-neutral-200 rounded-tl-none",
+                      "bg-white/5 text-white/90 border border-white/5 rounded-tl-none"
+                    )
             )}>
               {msg.content}
               {msg.isSecurityAlert && (
@@ -256,18 +301,30 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
           const Icon = s.icon;
           return (
             <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-brand-primary/20 flex items-center justify-center shrink-0">
-                <Icon className="w-4 h-4 text-brand-primary" />
+              <div className={cn(
+                "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
+                t("bg-emerald-50 border border-emerald-100", "bg-brand-primary/20")
+              )}>
+                <Icon className={cn("w-4 h-4", t("text-emerald-700", "text-brand-primary"))} />
               </div>
-              <div className="px-4 py-3 rounded-2xl bg-white/5 border border-brand-primary/20 rounded-tl-none min-w-[280px] max-w-[340px]">
+              <div className={cn(
+                "px-4 py-3 rounded-2xl rounded-tl-none min-w-[280px] max-w-[340px] border",
+                t("bg-emerald-50/60 border-emerald-200", "bg-white/5 border-brand-primary/20")
+              )}>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium text-white/90">{s.label}</span>
-                  <span className="w-1.5 h-1.5 bg-brand-primary rounded-full animate-pulse" />
+                  <span className={cn("text-sm font-medium", t("text-neutral-900", "text-white/90"))}>{s.label}</span>
+                  <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", t("bg-emerald-600", "bg-brand-primary"))} />
                 </div>
-                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-2">{s.sub}</div>
-                <div className="h-[3px] w-full bg-white/5 rounded-full overflow-hidden">
+                <div className={cn("text-[10px] uppercase tracking-wider mb-2", t("text-neutral-500", "text-white/40"))}>{s.sub}</div>
+                <div className={cn("h-[3px] w-full rounded-full overflow-hidden", t("bg-emerald-100", "bg-white/5"))}>
                   <div
-                    className="h-full bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-primary bg-[length:200%_100%] animate-[shimmer_1.4s_linear_infinite]"
+                    className={cn(
+                      "h-full bg-[length:200%_100%] animate-[shimmer_1.4s_linear_infinite]",
+                      t(
+                        "bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-600",
+                        "bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-primary"
+                      )
+                    )}
                     style={{ width: `${25 * (loaderStage + 1)}%` }}
                   />
                 </div>
@@ -277,7 +334,9 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
                       key={i}
                       className={cn(
                         "h-1 flex-1 rounded-full transition-all duration-500",
-                        i <= loaderStage ? "bg-brand-primary" : "bg-white/10"
+                        i <= loaderStage
+                          ? t("bg-emerald-600", "bg-brand-primary")
+                          : t("bg-neutral-200", "bg-white/10")
                       )}
                     />
                   ))}
@@ -289,9 +348,12 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
       </div>
 
       {/* Input */}
-      <form 
+      <form
         onSubmit={handleSendMessage}
-        className="p-4 bg-white/5 border-t border-white/10"
+        className={cn(
+          "p-4 border-t",
+          t("bg-neutral-50/40 border-neutral-200", "bg-white/5 border-white/10")
+        )}
       >
         <div className="relative group">
           <input
@@ -299,18 +361,27 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type your message..."
-            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-4 pr-12 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 focus:border-brand-primary/50 transition-all"
+            className={cn(
+              "w-full rounded-xl py-3 pl-4 pr-12 text-sm focus:outline-none focus:ring-2 transition-all border",
+              t(
+                "bg-white border-neutral-200 text-neutral-900 placeholder:text-neutral-400 focus:ring-emerald-500/30 focus:border-emerald-500/60",
+                "bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:ring-brand-primary/50 focus:border-brand-primary/50"
+              )
+            )}
             disabled={isLoading}
           />
           <button
             type="submit"
             disabled={!input.trim() || isLoading}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg bg-brand-primary text-white flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-primary/80 transition-colors"
+            className={cn(
+              "absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg text-white flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+              t("bg-emerald-600 hover:bg-emerald-700", "bg-brand-primary hover:bg-brand-primary/80")
+            )}
           >
             <Send className="w-4 h-4" />
           </button>
         </div>
-        <p className="mt-2 text-[10px] text-center text-white/30">
+        <p className={cn("mt-2 text-[10px] text-center", t("text-neutral-500", "text-white/30"))}>
           HIPAA-Compliant • PHI Redaction Active • Powered by Veea & Gemini 2.5 Flash
         </p>
       </form>
