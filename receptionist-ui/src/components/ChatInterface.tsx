@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Send, Shield, AlertTriangle, User, Bot, CheckCircle, RefreshCw } from "lucide-react";
+import { Send, Shield, AlertTriangle, User, Bot, CheckCircle, RefreshCw, Search, Cpu, Sparkles } from "lucide-react";
 import { gsap } from "gsap";
 import { useGSAP } from "@gsap/react";
 import { clsx, type ClassValue } from "clsx";
@@ -44,7 +44,20 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loaderStage, setLoaderStage] = useState(0);
   const [securityStatus, setSecurityStatus] = useState<"protected" | "alert">("protected");
+
+  useEffect(() => {
+    if (!isLoading) {
+      setLoaderStage(0);
+      return;
+    }
+    setLoaderStage(0);
+    const id = setInterval(() => {
+      setLoaderStage((s) => (s < 3 ? s + 1 : s));
+    }, 750);
+    return () => clearInterval(id);
+  }, [isLoading]);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -206,20 +219,47 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
             </div>
           </div>
         ))}
-        {isLoading && (
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-full bg-brand-primary/20 flex items-center justify-center">
-              <RefreshCw className="w-4 h-4 text-brand-primary animate-spin" />
-            </div>
-            <div className="p-4 rounded-2xl bg-white/5 border border-white/5 rounded-tl-none">
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 bg-white/30 rounded-full animate-bounce" />
-                <span className="w-1.5 h-1.5 bg-white/30 rounded-full animate-bounce [animation-delay:0.2s]" />
-                <span className="w-1.5 h-1.5 bg-white/30 rounded-full animate-bounce [animation-delay:0.4s]" />
+        {isLoading && (() => {
+          const stages = [
+            { icon: Shield,    label: "Inspecting message",         sub: "Veea Lobster Trap · DPI" },
+            { icon: Search,    label: "Pattern matching",           sub: "22 healthcare attack signatures" },
+            { icon: Cpu,       label: "Routing through model chain", sub: "Featherless → Gemini" },
+            { icon: Sparkles,  label: "Generating compliant response", sub: "HIPAA-aware reply" },
+          ];
+          const s = stages[loaderStage] ?? stages[stages.length - 1];
+          const Icon = s.icon;
+          return (
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-brand-primary/20 flex items-center justify-center shrink-0">
+                <Icon className="w-4 h-4 text-brand-primary" />
+              </div>
+              <div className="px-4 py-3 rounded-2xl bg-white/5 border border-brand-primary/20 rounded-tl-none min-w-[280px] max-w-[340px]">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-medium text-white/90">{s.label}</span>
+                  <span className="w-1.5 h-1.5 bg-brand-primary rounded-full animate-pulse" />
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-2">{s.sub}</div>
+                <div className="h-[3px] w-full bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-primary bg-[length:200%_100%] animate-[shimmer_1.4s_linear_infinite]"
+                    style={{ width: `${25 * (loaderStage + 1)}%` }}
+                  />
+                </div>
+                <div className="mt-2 flex gap-1.5">
+                  {stages.map((_, i) => (
+                    <span
+                      key={i}
+                      className={cn(
+                        "h-1 flex-1 rounded-full transition-all duration-500",
+                        i <= loaderStage ? "bg-brand-primary" : "bg-white/10"
+                      )}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Input */}

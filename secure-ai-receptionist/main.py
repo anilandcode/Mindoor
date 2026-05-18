@@ -224,19 +224,30 @@ def check_availability(date: str) -> str:
 
 FEATHERLESS_ENDPOINT = "https://api.featherless.ai/v1/chat/completions"
 
-async def call_featherless(model_id: str, user_message: str, timeout: float = 20.0):
+MAX_HISTORY_TURNS = 20  # cap conversation history to last 20 turns (10 pairs)
+
+def _trim_history(history):
+    """Take the last N turns to bound token usage."""
+    return history[-MAX_HISTORY_TURNS:] if len(history) > MAX_HISTORY_TURNS else history
+
+
+async def call_featherless(model_id: str, history, timeout: float = 20.0):
     """Call a Featherless.ai model via OpenAI-compatible endpoint.
+    `history` is the full list[ChatMessage] — system prompt is prepended.
     Returns (text, None) on success, (None, error_str) on failure."""
     api_key = os.getenv("FEATHERLESS_API_KEY")
     if not api_key:
         return None, "FEATHERLESS_API_KEY not set"
 
+    trimmed = _trim_history(history)
+    openai_messages = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
+    for m in trimmed:
+        role = m.role if m.role in ("user", "assistant", "system") else "user"
+        openai_messages.append({"role": role, "content": m.content})
+
     payload = {
         "model": model_id,
-        "messages": [
-            {"role": "system", "content": SYSTEM_INSTRUCTION},
-            {"role": "user",   "content": user_message},
-        ],
+        "messages": openai_messages,
         "temperature": 0.3,
         "max_tokens": 512,
     }
@@ -260,19 +271,39 @@ async def call_featherless(model_id: str, user_message: str, timeout: float = 20
         return None, f"exception: {str(e)[:200]}"
 
 
-def call_gemini(user_message: str):
-    """Call Gemini with the check_availability tool. Synchronous (genai SDK is sync).
-    Returns (text, None) on success, (None, error_str) on failure."""
+def call_gemini(history):
+    """Call Gemini with the check_availability tool, passing full history.
+    `history` is list[ChatMessage]. Returns (text, None) on success, (None, error_str) on failure.
+
+    Strategy: rebuild a chat session by replaying every prior user turn through
+    send_message, then send the final user turn and return its response. Tool
+    calls and assistant turns are reconstructed from history so Gemini sees the
+    full context. The genai SDK doesn't accept pre-seeded chat history directly,
+    so we use the `history` param of chats.create() with Content objects.
+    """
     try:
+        trimmed = _trim_history(history)
+        if not trimmed:
+            return None, "empty_history"
+
+        # Build pre-existing turns (everything EXCEPT the last user message)
+        prior_turns = trimmed[:-1]
+        seed = []
+        for m in prior_turns:
+            role = "model" if m.role == "assistant" else "user"
+            seed.append(types.Content(role=role, parts=[types.Part.from_text(text=m.content)]))
+
         chat = get_gemini_client().chats.create(
             model="gemini-2.5-flash-lite",
+            history=seed if seed else None,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.3,
                 tools=[check_availability],
             ),
         )
-        response = chat.send_message(user_message)
+        last_user = trimmed[-1].content
+        response = chat.send_message(last_user)
         text = (response.text or "").strip()
         if not text:
             return None, "empty_response"
@@ -283,9 +314,9 @@ def call_gemini(user_message: str):
         return None, f"exception: {str(e)[:200]}"
 
 
-async def run_chat_with_fallback(user_message: str, _messages):
-    """Walk the provider chain. Returns (text, model_used, last_error).
-    text is None only if every provider failed."""
+async def run_chat_with_fallback(messages):
+    """Walk the provider chain with full conversation history.
+    Returns (text, model_used, last_error). text is None only if every provider failed."""
     chain = []
     for i in (1, 2, 3):
         mid = os.getenv(f"FEATHERLESS_MODEL_{i}", "").strip()
@@ -295,11 +326,11 @@ async def run_chat_with_fallback(user_message: str, _messages):
 
     last_err = "no_providers_configured"
     for provider, model_id in chain:
-        print(f"[MODEL CHAIN] trying {provider}:{model_id}")
+        print(f"[MODEL CHAIN] trying {provider}:{model_id}  (history_turns={len(messages)})")
         if provider == "featherless":
-            text, err = await call_featherless(model_id, user_message)
+            text, err = await call_featherless(model_id, messages)
         else:
-            text, err = call_gemini(user_message)
+            text, err = call_gemini(messages)
         if text is not None:
             print(f"[MODEL CHAIN] ✓ {provider}:{model_id} responded ({len(text)} chars)")
             return text, f"{provider}:{model_id}", None
@@ -339,7 +370,7 @@ async def chat_endpoint(request: ChatRequest):
         }
 
     # Multi-provider fallback chain — tries each in order until one succeeds
-    resp_text, model_used, model_err = await run_chat_with_fallback(user_message, request.messages)
+    resp_text, model_used, model_err = await run_chat_with_fallback(request.messages)
     latency = (time.perf_counter() - start) * 1000
 
     if resp_text is None:
