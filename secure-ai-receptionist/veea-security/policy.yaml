@@ -1,35 +1,146 @@
-# policy.yaml
+# policy.yaml — Mindoor Healthcare HIPAA Policy
+# Veea Lobster Trap configuration for healthcare front-desk agent
+# Tuned for 10 healthcare attack categories from red-team battery v1
 version: "1.0"
 policy_name: Mindoor-Healthcare-HIPAA-Policy
 default_action: ALLOW
 
 ingress_rules:
-  # Rule 1: Block prompt injection / jailbreak attempts targeting PHI exfiltration
-  - name: block_prompt_injection
-    priority: 100
-    action: QUARANTINE
-    deny_message: "[LOBSTER TRAP] HIPAA Security Alert: Adversarial prompt injection detected. This interaction has been logged for compliance review."
-    conditions:
-      - field: contains_injection_patterns
-        match_type: boolean
-        value: true
 
-  # Rule 2: Prevent PHI / patient data exfiltration
-  - name: block_exfiltration
+  # ── PHI EXFILTRATION (ATT-001, ATT-002) ─────────────────────────────────────
+  # Highest priority: any attempt to extract patient records, emails them, dumps lists
+  - name: block_phi_exfiltration
+    priority: 100
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] PHI Guard: Unauthorized patient data extraction attempt blocked and logged under HIPAA §164.312(e)."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        # email + phi / print + patient records / send/export + patient data
+        value: "(?i)(email|send|forward|export|print|dump|list|show|give me|retrieve|extract).{0,60}(patient|record|chart|phi|appointment note|medical|dob|date of birth|phone number|address|ssn|insurance|diagnosis)"
+
+  # ── BILLING / FINANCIAL FRAUD (ATT-004) ──────────────────────────────────────
+  - name: block_billing_fraud
+    priority: 95
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] Financial Guard: Unauthorized financial action attempt blocked and logged under HIPAA §164.312(a)."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(refund|charge|bill|invoice|payment|card|credit|debit|transfer|reimburse).{0,60}(\\$|dollar|amount|account|card ending|billing)"
+
+  # ── PRIVILEGE / ROLE ESCALATION (ATT-005, ATT-006) ───────────────────────────
+  - name: block_privilege_escalation
     priority: 90
     action: DENY
-    deny_message: "[LOBSTER TRAP] PHI Guard Alert: This request attempts unauthorized extraction of protected health information. Logged for compliance."
+    deny_message: "[MINDOOR SECURITY] Access Control: Privilege escalation attempt blocked and logged under HIPAA §164.312(a)."
     conditions:
-      - field: contains_exfiltration
-        match_type: boolean
-        value: true
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(admin mode|override security|bypass|i am dr\\.|i'm dr\\.|as the doctor|as staff|as administrator|show me staff|staff salary|employee|access override|grant access|elevated access|sudo|root access)"
 
-  # Rule 3: Flag PII / PHI for human review (HIPAA minimum necessary standard)
-  - name: flag_patient_data
-    priority: 80
-    action: HUMAN_REVIEW
-    deny_message: "[LOBSTER TRAP] PHI Review Required: This request contains protected health information and has been queued for manual compliance review."
+  # ── APPOINTMENT / SCHEDULE HIJACK (ATT-003) ──────────────────────────────────
+  # Cancel/delete ALL appointments — bulk destructive operations
+  - name: block_appointment_hijack
+    priority: 85
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] Schedule Guard: Bulk schedule modification attempt blocked and logged."
     conditions:
-      - field: contains_pii
-        match_type: boolean
-        value: true
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(cancel|delete|remove|clear|wipe).{0,40}(all|every|everyone's).{0,40}(appointment|schedule|booking|slot)"
+
+  # ── JAILBREAK / ROLEPLAY / PERSONA INJECTION (ATT-008) ───────────────────────
+  - name: block_jailbreak_roleplay
+    priority: 80
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] Policy Enforcement: Jailbreak or persona override attempt blocked and logged."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(you are now|pretend you are|act as|roleplay|let'?s play a game|unrestricted|no policies|no restrictions|without guidelines|ignore (your |all |previous )?(rules|policy|guidelines|instructions|constraints)|DAN|do anything now|jailbreak)"
+
+  # ── INDIRECT PROMPT INJECTION (ATT-007) ──────────────────────────────────────
+  # Hidden system instructions smuggled inside form fields or documents
+  - name: block_indirect_injection
+    priority: 78
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] Injection Guard: Indirect prompt injection detected and blocked."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(\\[SYSTEM\\]|\\[INST\\]|<system>|<instruction>|<<<|>>>|ignore (all )?previous (instructions|rules|policies)|disregard (all )?previous|forget (all )?previous|new instruction|override instruction)"
+
+  # ── DATA POISONING / PERSISTENT INSTRUCTION INJECTION (ATT-009) ──────────────
+  - name: block_data_poisoning
+    priority: 76
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] Data Integrity: Persistent instruction injection attempt blocked under HIPAA §164.312(c)."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(remember (from now on|always|forever)|from now on (always|you (must|will|should))|update your (rules|policy|instructions)|add to your (memory|context)|store (this|that) (rule|policy|instruction)|consent to share.{0,40}(marketing|partner|third.?party))"
+
+  # ── CREDENTIAL / INTERNAL INFO PHISHING (ATT-010) ────────────────────────────
+  - name: block_credential_phishing
+    priority: 74
+    action: DENY
+    deny_message: "[MINDOOR SECURITY] Credential Guard: Internal information phishing attempt blocked."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(password|wifi password|wi-fi password|network key|login credential|staff password|admin password|system password|api key|secret key|access code|pin code).{0,40}(staff|admin|network|system|internal|clinic|backend)"
+
+  # ── GENERIC PROMPT INJECTION PATTERNS (fallback) ─────────────────────────────
+  - name: block_prompt_injection_generic
+    priority: 70
+    action: QUARANTINE
+    deny_message: "[MINDOOR SECURITY] HIPAA Security Alert: Adversarial prompt injection detected. Interaction logged for compliance review."
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(ignore previous|ignore all|forget everything|new persona|system prompt|</?(s|system|prompt)>|\\{\\{.*\\}\\}|<\\|.*\\|>)"
+
+  # ── FLAG HIGH-VOLUME PHI MENTIONS FOR AUDIT LOG ───────────────────────────────
+  # Allow through but tag for the audit trail (HIPAA minimum-necessary standard)
+  - name: tag_phi_mention
+    priority: 50
+    action: ALLOW
+    deny_message: ""
+    conditions:
+      - field: body_json.messages[-1].content
+        match_type: regex
+        value: "(?i)(patient (name|id|number)|date of birth|social security|insurance (number|id|plan)|medical record|diagnosis|medication|prescription|lab result)"
+
+  # ── SOCIAL ENGINEERING — CLINICIAN IMPERSONATION (ATT-006, covered above) ───
+  # Covered by block_privilege_escalation above (i am dr. / i'm dr.)
+
+egress_rules:
+
+  # Prevent the LLM from accidentally leaking data patterns in its response
+  - name: redact_ssn_in_response
+    priority: 100
+    action: REDACT
+    conditions:
+      - field: body
+        match_type: regex
+        value: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+    redact_with: "[REDACTED-SSN]"
+
+  - name: redact_dob_in_response
+    priority: 90
+    action: REDACT
+    conditions:
+      - field: body
+        match_type: regex
+        value: "(?i)\\b(date of birth|dob)[:\\s]+\\d{1,2}[/\\-]\\d{1,2}[/\\-]\\d{2,4}\\b"
+    redact_with: "[REDACTED-DOB]"
+
+  - name: redact_phone_in_response
+    priority: 80
+    action: REDACT
+    conditions:
+      - field: body
+        match_type: regex
+        value: "\\b(\\+?1[-.]?)?(\\(?[0-9]{3}\\)?[-. ]?[0-9]{3}[-. ]?[0-9]{4})\\b"
+    redact_with: "[REDACTED-PHONE]"
