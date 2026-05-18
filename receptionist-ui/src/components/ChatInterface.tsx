@@ -223,7 +223,7 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
           const stages = [
             { icon: Shield,    label: "Inspecting message",         sub: "Veea Lobster Trap · DPI" },
             { icon: Search,    label: "Pattern matching",           sub: "22 healthcare attack signatures" },
-            { icon: Cpu,       label: "Routing through model chain", sub: "Featherless → Gemini" },
+            { icon: Cpu,       label: "Routing through model chain", sub: "Vultr → Featherless → Gemini" },
             { icon: Sparkles,  label: "Generating compliant response", sub: "HIPAA-aware reply" },
           ];
           const s = stages[loaderStage] ?? stages[stages.length - 1];
