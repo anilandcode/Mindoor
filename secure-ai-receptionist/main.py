@@ -232,16 +232,28 @@ MAX_HISTORY_TURNS = 20  # cap conversation history to last 20 turns (10 pairs)
 # of actually invoking a tool. We strip these from non-Gemini responses so the
 # UI never shows raw <tool_call> tags or pseudo-JSON.
 _TOOL_LEAK_PATTERNS = [
+    # Tool-call leakage (models hallucinating function calls as plain text)
     re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL | re.IGNORECASE),
     re.compile(r"<function_call>.*?</function_call>", re.DOTALL | re.IGNORECASE),
     re.compile(r"<tool_use>.*?</tool_use>", re.DOTALL | re.IGNORECASE),
     re.compile(r"<function>.*?</function>", re.DOTALL | re.IGNORECASE),
     re.compile(r"```(?:tool_code|tool_call|function_call|json)?\s*\{\s*[\"']?name[\"']?\s*:.*?\}\s*```", re.DOTALL | re.IGNORECASE),
     re.compile(r"\{\s*[\"']name[\"']\s*:\s*[\"']check_availability[\"'][^}]*\}", re.DOTALL),
+    # Reasoning / chain-of-thought leakage (MiniMax-M2, DeepSeek-R, Qwen-thinking,
+    # GLM-thinking, etc. wrap their CoT in these tags inside `content`).
+    re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE),
+    re.compile(r"<thinking>.*?</thinking>", re.DOTALL | re.IGNORECASE),
+    re.compile(r"<reasoning>.*?</reasoning>", re.DOTALL | re.IGNORECASE),
+    re.compile(r"<\|im_start\|>think.*?<\|im_end\|>", re.DOTALL | re.IGNORECASE),
+    # Unclosed <think> blocks (when reasoning gets truncated by max_tokens)
+    re.compile(r"<think>.*$", re.DOTALL | re.IGNORECASE),
+    re.compile(r"<thinking>.*$", re.DOTALL | re.IGNORECASE),
 ]
 
 def clean_response_text(text: str) -> str:
-    """Strip pseudo tool-call syntax from non-Gemini model responses."""
+    """Strip pseudo tool-call syntax AND chain-of-thought traces from
+    non-Gemini model responses. Patient-facing chat must never expose
+    <think> / <reasoning> internals."""
     if not text:
         return text
     cleaned = text
@@ -273,7 +285,10 @@ async def call_vultr(model_id: str, history, timeout: float = 20.0):
         "model": model_id,
         "messages": openai_messages,
         "temperature": 0.3,
-        "max_tokens": 512,
+        # Reasoning models (e.g. Kimi-K2.6, Nemotron Reasoning) burn budget on
+        # internal chain-of-thought before producing `content`. 1500 tokens is
+        # enough for ~500 reasoning tokens + a full receptionist reply.
+        "max_tokens": 1500,
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -285,10 +300,20 @@ async def call_vultr(model_id: str, history, timeout: float = 20.0):
         if r.status_code != 200:
             return None, f"http_{r.status_code}: {r.text[:200]}"
         data = r.json()
-        text = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        msg = (data.get("choices") or [{}])[0].get("message", {}) or {}
+        text = (msg.get("content") or "").strip()
+        # Some reasoning models return content=null with reasoning trace separately.
+        # If content is empty but the model burned tokens on reasoning, treat as
+        # a failure so we fall through to a non-reasoning model — patient-facing
+        # chat should never expose chain-of-thought prose.
+        if not text:
+            reasoning = (msg.get("reasoning") or "").strip()
+            if reasoning:
+                return None, f"reasoning_only_no_content (finish={data.get('choices',[{}])[0].get('finish_reason')})"
+            return None, "empty_response"
         text = clean_response_text(text)
         if not text:
-            return None, "empty_response"
+            return None, "empty_response_after_clean"
         return text, None
     except httpx.TimeoutException:
         return None, "timeout"
@@ -314,7 +339,7 @@ async def call_featherless(model_id: str, history, timeout: float = 20.0):
         "model": model_id,
         "messages": openai_messages,
         "temperature": 0.3,
-        "max_tokens": 512,
+        "max_tokens": 1500,
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
