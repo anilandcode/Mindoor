@@ -212,6 +212,104 @@ def check_availability(date: str) -> str:
     return f"No availability on {date}. Please try another date."
 
 # ---------------------------------------------------------------------------
+# Multi-provider model chain
+# ---------------------------------------------------------------------------
+# Order of attempts:
+#   1. FEATHERLESS_MODEL_1  (text-only, OpenAI-compatible)
+#   2. FEATHERLESS_MODEL_2  (text-only)
+#   3. FEATHERLESS_MODEL_3  (text-only)
+#   4. Gemini 2.5 Flash-Lite (final fallback, retains check_availability tool)
+# Each model gets ~20s. Failure modes that trigger fallback: HTTP non-2xx,
+# timeout, empty/null response text, JSON parse error.
+
+FEATHERLESS_ENDPOINT = "https://api.featherless.ai/v1/chat/completions"
+
+async def call_featherless(model_id: str, user_message: str, timeout: float = 20.0):
+    """Call a Featherless.ai model via OpenAI-compatible endpoint.
+    Returns (text, None) on success, (None, error_str) on failure."""
+    api_key = os.getenv("FEATHERLESS_API_KEY")
+    if not api_key:
+        return None, "FEATHERLESS_API_KEY not set"
+
+    payload = {
+        "model": model_id,
+        "messages": [
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user",   "content": user_message},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 512,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type":  "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(FEATHERLESS_ENDPOINT, json=payload, headers=headers)
+        if r.status_code != 200:
+            return None, f"http_{r.status_code}: {r.text[:200]}"
+        data = r.json()
+        text = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        if not text:
+            return None, "empty_response"
+        return text, None
+    except httpx.TimeoutException:
+        return None, "timeout"
+    except Exception as e:
+        return None, f"exception: {str(e)[:200]}"
+
+
+def call_gemini(user_message: str):
+    """Call Gemini with the check_availability tool. Synchronous (genai SDK is sync).
+    Returns (text, None) on success, (None, error_str) on failure."""
+    try:
+        chat = get_gemini_client().chats.create(
+            model="gemini-2.5-flash-lite",
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_INSTRUCTION,
+                temperature=0.3,
+                tools=[check_availability],
+            ),
+        )
+        response = chat.send_message(user_message)
+        text = (response.text or "").strip()
+        if not text:
+            return None, "empty_response"
+        return text, None
+    except HTTPException as e:
+        return None, f"http_exception: {e.detail}"
+    except Exception as e:
+        return None, f"exception: {str(e)[:200]}"
+
+
+async def run_chat_with_fallback(user_message: str, _messages):
+    """Walk the provider chain. Returns (text, model_used, last_error).
+    text is None only if every provider failed."""
+    chain = []
+    for i in (1, 2, 3):
+        mid = os.getenv(f"FEATHERLESS_MODEL_{i}", "").strip()
+        if mid:
+            chain.append(("featherless", mid))
+    chain.append(("gemini", "gemini-2.5-flash-lite"))
+
+    last_err = "no_providers_configured"
+    for provider, model_id in chain:
+        print(f"[MODEL CHAIN] trying {provider}:{model_id}")
+        if provider == "featherless":
+            text, err = await call_featherless(model_id, user_message)
+        else:
+            text, err = call_gemini(user_message)
+        if text is not None:
+            print(f"[MODEL CHAIN] ✓ {provider}:{model_id} responded ({len(text)} chars)")
+            return text, f"{provider}:{model_id}", None
+        print(f"[MODEL CHAIN] ✗ {provider}:{model_id} failed: {err}")
+        last_err = f"{provider}:{model_id} -> {err}"
+
+    return None, None, last_err
+
+
+# ---------------------------------------------------------------------------
 # Chat endpoint
 # ---------------------------------------------------------------------------
 class ChatMessage(BaseModel):
@@ -240,54 +338,36 @@ async def chat_endpoint(request: ChatRequest):
             "event_id": event["id"],
         }
 
-    try:
-        chat = get_gemini_client().chats.create(
-            model="gemini-2.5-flash-lite",
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                temperature=0.3,
-                tools=[check_availability],
-            ),
-        )
-        response = chat.send_message(user_message)
-        latency = (time.perf_counter() - start) * 1000
-        resp_text = response.text
+    # Multi-provider fallback chain — tries each in order until one succeeds
+    resp_text, model_used, model_err = await run_chat_with_fallback(user_message, request.messages)
+    latency = (time.perf_counter() - start) * 1000
 
-        is_security_refusal = (
-            "logged for compliance review" in resp_text.lower()
-            or "unable to fulfill" in resp_text.lower()
-        )
-        action = "BLOCK" if is_security_refusal else "ALLOW"
-        rule = "gemini_guardrail" if is_security_refusal else ""
-        event = make_event(user_message, action, rule, latency, "fastapi")
-        append_event(event)
-        print(f"\n[COMPLIANCE] {action} | category={event['category']} | latency={latency:.0f}ms")
-
+    if resp_text is None:
         return {
-            "response": resp_text,
-            "security_alert": is_security_refusal,
-            "reason": rule or "Passed Security Inspection",
-            "event_id": event["id"],
-        }
-    except Exception as e:
-        err_str = str(e)
-        latency = (time.perf_counter() - start) * 1000
-        # Surface any Gemini API failure as a friendly upstream error, not a security block
-        if any(code in err_str for code in ["RESOURCE_EXHAUSTED", "429", "UNAVAILABLE", "503", "INTERNAL", "500", "DEADLINE_EXCEEDED"]):
-            return {
-                "response": "Our AI service is temporarily unavailable. Please try again in a moment — this is not a security block.",
-                "security_alert": False,
-                "reason": "upstream_error",
-                "upstream_error": True,
-                "latency_ms": round(latency, 1),
-            }
-        return {
-            "response": "Something went wrong on our side. Please try again.",
+            "response": "Our AI service is temporarily unavailable across all providers. Please try again in a moment — this is not a security block.",
             "security_alert": False,
-            "reason": "backend_error",
+            "reason": f"all_providers_failed: {model_err}",
             "upstream_error": True,
             "latency_ms": round(latency, 1),
         }
+
+    is_security_refusal = (
+        "logged for compliance review" in resp_text.lower()
+        or "unable to fulfill" in resp_text.lower()
+    )
+    action = "BLOCK" if is_security_refusal else "ALLOW"
+    rule = "gemini_guardrail" if is_security_refusal else ""
+    event = make_event(user_message, action, rule, latency, "fastapi")
+    append_event(event)
+    print(f"\n[COMPLIANCE] {action} | model={model_used} | category={event['category']} | latency={latency:.0f}ms")
+
+    return {
+        "response": resp_text,
+        "security_alert": is_security_refusal,
+        "reason": rule or "Passed Security Inspection",
+        "event_id": event["id"],
+        "model_used": model_used,
+    }
 
 # ---------------------------------------------------------------------------
 # External event log (receives Lobster Trap blocks reported by the frontend)
