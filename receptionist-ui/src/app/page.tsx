@@ -1,7 +1,7 @@
 import ChatInterface from "@/components/ChatInterface";
 import {
-  Shield, ShieldCheck, Cpu, FileCheck2, ArrowUpRight, Github,
-  Activity, ScanSearch, Network, FileText, Lock, ChevronRight,
+  Shield, ShieldCheck, Cpu, FileText, ChevronRight,
+  Search, Sparkles, CheckCircle,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -32,13 +32,13 @@ export default function Home() {
               target="_blank"
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] text-neutral-700 hover:bg-neutral-100 transition"
             >
-              <Github className="w-3.5 h-3.5" /> GitHub
+              GitHub
             </a>
             <Link
               href="/operator"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-900 text-white text-[12px] font-medium hover:bg-neutral-800 transition"
             >
-              Open Operator View <ArrowUpRight className="w-3.5 h-3.5" />
+              Open Operator View <ChevronRight className="w-3.5 h-3.5" />
             </Link>
           </div>
         </div>
@@ -134,10 +134,10 @@ export default function Home() {
           <div className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">Trust layer powered by</div>
           <div className="flex flex-wrap items-center gap-x-8 gap-y-3 text-[13px] font-medium text-neutral-700">
             <span className="flex items-center gap-1.5"><Shield className="w-3.5 h-3.5" /> Veea Lobster Trap</span>
-            <span className="flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5" /> Google Gemini 2.5</span>
-            <span className="flex items-center gap-1.5"><Network className="w-3.5 h-3.5" /> Vultr Inference</span>
-            <span className="flex items-center gap-1.5"><FileCheck2 className="w-3.5 h-3.5" /> HIPAA §164.312</span>
-            <span className="flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" /> MIT License</span>
+            <span className="flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" /> Google Gemini 2.5</span>
+            <span className="flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5" /> Vultr Inference</span>
+            <span className="flex items-center gap-1.5"><CheckCircle className="w-3.5 h-3.5" /> HIPAA §164.312</span>
+            <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> MIT License</span>
           </div>
         </div>
       </section>
@@ -154,7 +154,7 @@ export default function Home() {
 
           <div className="grid md:grid-cols-3 gap-0 border border-neutral-200 rounded-xl overflow-hidden bg-white">
             <Feature
-              icon={<ScanSearch className="w-5 h-5" />}
+              icon={<Search className="w-5 h-5" />}
               label="Layer 1 · Network"
               title="Veea Lobster Trap DPI"
               body="Deep prompt inspection at the network edge. Policy enforcement, quarantine, and block actions before traffic ever reaches the model. 22 healthcare-specific attack signatures tuned for HIPAA workloads."
@@ -162,7 +162,7 @@ export default function Home() {
               border="right"
             />
             <Feature
-              icon={<Activity className="w-5 h-5" />}
+              icon={<Cpu className="w-5 h-5" />}
               label="Layer 2 · Application"
               title="FastAPI Regex Gate"
               body="22 healthcare-tuned regex patterns covering PHI exfiltration, billing fraud, role escalation, jailbreak/roleplay, indirect injection, data poisoning, and credential phishing."

@@ -462,11 +462,23 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage]
 
 @app.post("/api/chat")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest, guards_off: bool = Query(False)):
     start = time.perf_counter()
     user_message = request.messages[-1].content
 
-    pattern_match = block_reason(user_message)
+    # ── DEMO TOGGLE: Lobster Trap / regex layer disabled ─────────────────────
+    # When guards_off=true, skip the application-layer security check entirely.
+    # This is the dramatic "with vs without Veea" demo for judges. Any attack
+    # that would normally be blocked now passes through to the model. The event
+    # is still logged so the operator dashboard can show the bypass occurred.
+    pattern_match = None if guards_off else block_reason(user_message)
+    if guards_off:
+        bypass_event = make_event(
+            user_message, "ALLOW", "guards_off_bypass",
+            (time.perf_counter() - start) * 1000, "guards_off",
+        )
+        append_event(bypass_event)
+        print(f"\n[GUARDS OFF] bypass | snippet={user_message[:60]!r}")
     if pattern_match:
         latency = (time.perf_counter() - start) * 1000
         event = make_event(user_message, "BLOCK", "regex_pattern_match", latency, "fastapi")

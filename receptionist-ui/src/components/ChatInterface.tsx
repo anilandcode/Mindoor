@@ -46,6 +46,7 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [loaderStage, setLoaderStage] = useState(0);
   const [securityStatus, setSecurityStatus] = useState<"protected" | "alert">("protected");
+  const [guardsOff, setGuardsOff] = useState(false);
 
   useEffect(() => {
     if (!isLoading) {
@@ -93,7 +94,7 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
     const reqStart = Date.now();
     try {
       const response = await fetch(
-        `${API_BASE}/api/chat`,
+        `${API_BASE}/api/chat${guardsOff ? "?guards_off=true" : ""}`,
         {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -161,23 +162,48 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
           </div>
         </div>
         
-        <div className={cn(
-          "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-500",
-          securityStatus === "protected" 
-            ? "bg-brand-secondary/10 text-brand-secondary border border-brand-secondary/20" 
-            : "bg-brand-destructive/10 text-brand-destructive border border-brand-destructive/20 glow shadow-brand-destructive/20"
-        )}>
-          {securityStatus === "protected" ? (
-            <>
-              <Shield className="w-3.5 h-3.5" />
-              Protected by Lobster Trap
-            </>
-          ) : (
-            <>
-              <AlertTriangle className="w-3.5 h-3.5 animate-bounce" />
-              Security Alert: Injection Blocked
-            </>
-          )}
+        <div className="flex items-center gap-2">
+          {/* Veea ON / OFF demo toggle */}
+          <button
+            type="button"
+            onClick={() => setGuardsOff((v) => !v)}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-mono uppercase tracking-wider transition-all border",
+              guardsOff
+                ? "bg-brand-destructive/15 text-brand-destructive border-brand-destructive/40 hover:bg-brand-destructive/25"
+                : "bg-white/5 text-white/60 border-white/10 hover:text-white/90 hover:bg-white/10"
+            )}
+            title="Toggle Veea Lobster Trap on/off for demo"
+          >
+            <span className={cn("w-1.5 h-1.5 rounded-full", guardsOff ? "bg-brand-destructive animate-pulse" : "bg-brand-secondary")} />
+            Veea {guardsOff ? "OFF" : "ON"}
+          </button>
+
+          <div className={cn(
+            "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-500",
+            guardsOff
+              ? "bg-brand-destructive/10 text-brand-destructive border border-brand-destructive/30"
+              : securityStatus === "protected"
+                ? "bg-brand-secondary/10 text-brand-secondary border border-brand-secondary/20"
+                : "bg-brand-destructive/10 text-brand-destructive border border-brand-destructive/20 glow shadow-brand-destructive/20"
+          )}>
+            {guardsOff ? (
+              <>
+                <AlertTriangle className="w-3.5 h-3.5" />
+                Guardrails Disabled · DEMO
+              </>
+            ) : securityStatus === "protected" ? (
+              <>
+                <Shield className="w-3.5 h-3.5" />
+                Protected by Lobster Trap
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="w-3.5 h-3.5 animate-bounce" />
+                Security Alert: Injection Blocked
+              </>
+            )}
+          </div>
         </div>
       </div>
 
