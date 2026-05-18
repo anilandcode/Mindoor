@@ -29,7 +29,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+# Lazy client — initialised on first request so missing key doesn't crash startup
+_gemini_client = None
+
+def get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=503, detail="GEMINI_API_KEY not configured on this server.")
+        _gemini_client = genai.Client(api_key=api_key)
+    return _gemini_client
 
 # ---------------------------------------------------------------------------
 # In-memory event store (audit log)
@@ -231,7 +241,7 @@ async def chat_endpoint(request: ChatRequest):
         }
 
     try:
-        chat = client.chats.create(
+        chat = get_gemini_client().chats.create(
             model="gemini-2.5-flash",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
