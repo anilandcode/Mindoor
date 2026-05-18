@@ -219,7 +219,7 @@ class ChatMessage(BaseModel):
     content: str
 
 class ChatRequest(BaseModel):
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-2.5-flash-lite"
     messages: list[ChatMessage]
 
 @app.post("/api/chat")
@@ -242,7 +242,7 @@ async def chat_endpoint(request: ChatRequest):
 
     try:
         chat = get_gemini_client().chats.create(
-            model="gemini-2.5-flash",
+            model="gemini-2.5-flash-lite",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.3,
@@ -270,7 +270,17 @@ async def chat_endpoint(request: ChatRequest):
             "event_id": event["id"],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        err_str = str(e)
+        if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str:
+            latency = (time.perf_counter() - start) * 1000
+            return {
+                "response": "Our AI is temporarily over capacity. Please try again in a moment.",
+                "security_alert": False,
+                "reason": "rate_limit",
+                "rate_limited": True,
+                "latency_ms": round(latency, 1),
+            }
+        raise HTTPException(status_code=500, detail=err_str)
 
 # ---------------------------------------------------------------------------
 # External event log (receives Lobster Trap blocks reported by the frontend)
