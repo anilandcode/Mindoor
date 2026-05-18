@@ -271,16 +271,23 @@ async def chat_endpoint(request: ChatRequest):
         }
     except Exception as e:
         err_str = str(e)
-        if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str:
-            latency = (time.perf_counter() - start) * 1000
+        latency = (time.perf_counter() - start) * 1000
+        # Surface any Gemini API failure as a friendly upstream error, not a security block
+        if any(code in err_str for code in ["RESOURCE_EXHAUSTED", "429", "UNAVAILABLE", "503", "INTERNAL", "500", "DEADLINE_EXCEEDED"]):
             return {
-                "response": "Our AI is temporarily over capacity. Please try again in a moment.",
+                "response": "Our AI service is temporarily unavailable. Please try again in a moment — this is not a security block.",
                 "security_alert": False,
-                "reason": "rate_limit",
-                "rate_limited": True,
+                "reason": "upstream_error",
+                "upstream_error": True,
                 "latency_ms": round(latency, 1),
             }
-        raise HTTPException(status_code=500, detail=err_str)
+        return {
+            "response": "Something went wrong on our side. Please try again.",
+            "security_alert": False,
+            "reason": "backend_error",
+            "upstream_error": True,
+            "latency_ms": round(latency, 1),
+        }
 
 # ---------------------------------------------------------------------------
 # External event log (receives Lobster Trap blocks reported by the frontend)

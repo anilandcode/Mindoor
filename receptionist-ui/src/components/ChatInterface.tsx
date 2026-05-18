@@ -96,23 +96,22 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
       const latencyMs = Date.now() - reqStart;
       const data = await response.json();
 
-      // Check if Lobster Trap blocked it (network layer)
-      const isLobsterTrapBlock = data._lobstertrap?.verdict === "DENY" || !response.ok;
-      const isBlocked = isLobsterTrapBlock || data.security_alert;
+      const isUpstreamError = data.upstream_error === true;
+      const isLobsterTrapBlock = data._lobstertrap?.verdict === "DENY" || (!response.ok && !isUpstreamError);
+      const isSecurityBlock = (isLobsterTrapBlock || data.security_alert === true) && !isUpstreamError;
 
-      // Report Lobster Trap blocks back to our compliance event log
       if (isLobsterTrapBlock && !data.security_alert) {
         reportBlockToEventLog(userMsg, "lobster_trap_dpi", latencyMs);
       }
-      
-      if (isBlocked) {
+
+      if (isSecurityBlock) {
         setSecurityStatus("alert");
         setMessages((prev) => [
           ...prev,
-          { 
-            role: "assistant", 
+          {
+            role: "assistant",
             content: data.response || data.choices?.[0]?.message?.content || "Security block triggered.",
-            isSecurityAlert: true 
+            isSecurityAlert: true,
           },
         ]);
       } else {
