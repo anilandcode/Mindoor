@@ -5,9 +5,9 @@ import { Download, RefreshCw } from "lucide-react";
 import EventCard, { type SecurityEvent } from "./EventCard";
 import StatStrip from "./StatStrip";
 
-// Relative URLs — Next.js rewrites handle routing to the correct backend
-const EVENTS_URL = "/api/events";
-const AUDIT_URL  = "/api/audit/export";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+const EVENTS_URL = `${API_BASE}/api/events`;
+const AUDIT_URL  = `${API_BASE}/api/audit/export`;
 
 const POLL_INTERVAL_MS = 1500;
 

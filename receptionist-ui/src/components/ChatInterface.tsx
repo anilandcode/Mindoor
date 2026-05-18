@@ -17,10 +17,11 @@ interface Message {
   isSecurityAlert?: boolean;
 }
 
-// Relative URLs — Next.js rewrites in next.config.ts route these to the correct backend
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+
 async function reportBlockToEventLog(snippet: string, rule: string, latency: number) {
   try {
-    await fetch(`/api/log-event`, {
+    await fetch(`${API_BASE}/api/log-event`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "BLOCK", snippet: snippet.slice(0, 90), rule, latency_ms: latency }),
@@ -79,7 +80,7 @@ export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
     const reqStart = Date.now();
     try {
       const response = await fetch(
-        "/proxy/chat",   // → next.config.ts rewrites to LOBSTER_TRAP_URL/api/chat
+        `${API_BASE}/api/chat`,
         {
         method: "POST",
         headers: { "Content-Type": "application/json" },
