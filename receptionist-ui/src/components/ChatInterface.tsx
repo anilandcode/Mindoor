@@ -17,11 +17,28 @@ interface Message {
   isSecurityAlert?: boolean;
 }
 
-export default function ChatInterface() {
+// Relative URLs — Next.js rewrites in next.config.ts route these to the correct backend
+async function reportBlockToEventLog(snippet: string, rule: string, latency: number) {
+  try {
+    await fetch(`/api/log-event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "BLOCK", snippet: snippet.slice(0, 90), rule, latency_ms: latency }),
+    });
+  } catch {
+    // silent — log is best-effort
+  }
+}
+
+interface ChatInterfaceProps {
+  compact?: boolean;
+}
+
+export default function ChatInterface({ compact = false }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Hello! Welcome to Mindoor Wellness. I'm your AI receptionist. How can I assist you with your appointment or services today?",
+      content: "Hi, I'm the Mindoor front-desk assistant for Mindoor Health. I can help you book appointments, answer clinic questions, or take a message for our team. Every conversation here is logged and HIPAA-audited.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -59,22 +76,33 @@ export default function ChatInterface() {
     setIsLoading(true);
     setSecurityStatus("protected");
 
+    const reqStart = Date.now();
     try {
-      const response = await fetch("http://localhost:8080/api/chat", {
+      const response = await fetch(
+        "/proxy/chat",   // → next.config.ts rewrites to LOBSTER_TRAP_URL/api/chat
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [...messages, { role: "user", content: userMsg }].map(m => ({
-            role: m.role,
-            content: m.content
-          }))
-        }),
-      });
+          body: JSON.stringify({
+            messages: [...messages, { role: "user", content: userMsg }].map(m => ({
+              role: m.role,
+              content: m.content,
+            })),
+          }),
+        },
+      );
 
+      const latencyMs = Date.now() - reqStart;
       const data = await response.json();
-      
-      // Check if Lobster Trap blocked it
-      const isBlocked = data._lobstertrap?.verdict === "DENY" || data.security_alert;
+
+      // Check if Lobster Trap blocked it (network layer)
+      const isLobsterTrapBlock = data._lobstertrap?.verdict === "DENY" || !response.ok;
+      const isBlocked = isLobsterTrapBlock || data.security_alert;
+
+      // Report Lobster Trap blocks back to our compliance event log
+      if (isLobsterTrapBlock && !data.security_alert) {
+        reportBlockToEventLog(userMsg, "lobster_trap_dpi", latencyMs);
+      }
       
       if (isBlocked) {
         setSecurityStatus("alert");
@@ -104,7 +132,7 @@ export default function ChatInterface() {
   };
 
   return (
-    <div className="flex flex-col h-[80vh] w-full max-w-4xl glass-dark rounded-2xl overflow-hidden shadow-2xl border border-white/10">
+    <div className={`flex flex-col ${compact ? "h-full" : "h-[80vh] max-w-4xl"} w-full glass-dark rounded-2xl overflow-hidden shadow-2xl border border-white/10`}>
       {/* Header */}
       <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
         <div className="flex items-center gap-3">
@@ -112,10 +140,10 @@ export default function ChatInterface() {
             <Bot className="w-6 h-6 text-brand-primary" />
           </div>
           <div>
-            <h2 className="font-semibold text-lg leading-tight text-white">Mindoor Receptionist</h2>
+            <h2 className="font-semibold text-lg leading-tight text-white">Mindoor Front Desk</h2>
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-brand-secondary animate-pulse" />
-              <span className="text-xs text-white/50">Online • AI Reasoning</span>
+              <span className="text-xs text-white/50">Online • HIPAA Compliant</span>
             </div>
           </div>
         </div>
@@ -217,7 +245,7 @@ export default function ChatInterface() {
           </button>
         </div>
         <p className="mt-2 text-[10px] text-center text-white/30">
-          Enterprise Security Layer Active • Powered by Veea & Gemini 2.5 Flash
+          HIPAA-Compliant • PHI Redaction Active • Powered by Veea & Gemini 2.5 Flash
         </p>
       </form>
     </div>
